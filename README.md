@@ -13,81 +13,41 @@ npm run dev
 
 ---
 
-## Task 2 — Optimistic UI Implementation
+## Task 2 — Optimistic UI
 
-### How it works
+The whole thing runs on a single `useFetcher()` hook. No `useState`, no manual stock tracking.
 
-The `ClaimButton` component uses a single `useFetcher()` hook, which is the
-Remix-native way to submit data without triggering a full navigation.
-
-**Optimistic stock calculation (0ms feedback):**
+While the request is in-flight, `fetcher.formData` still holds the values we submitted. So instead of storing the "pending" stock somewhere, I just compute it on the fly:
 
 ```tsx
 const isSubmitting = fetcher.state !== "idle";
 
 const optimisticStock =
   isSubmitting && fetcher.formData?.get("id") === item.id
-    ? item.stock - 1   // shown instantly while request is in-flight
-    : item.stock;       // real server value when idle
+    ? item.stock - 1  // shown instantly on click
+    : item.stock;     // back to real value when idle
 ```
 
-While the network request is in-flight, `fetcher.formData` contains the form
-values we submitted. We read the `id` from it to confirm this fetcher belongs
-to *this* item, then subtract 1 from the server's last-known stock count. This
-gives the user instant visual feedback with **zero `useState` calls**.
+The moment the user clicks, `fetcher.state` flips to `"submitting"` and the UI shows `stock - 1` with zero delay. No extra code needed.
 
-**Rollback on error:**
+**Rollback** is also automatic. When the action returns an error, React Router revalidates the loader — which re-fetches the real stock from the server. Since the optimistic value is just a derived calculation (not stored state), it disappears naturally once `isSubmitting` goes back to `false`.
 
-No manual rollback code is needed. When the action returns `{ error: "Out of
-stock" }`, Remix automatically revalidates the loader. The loader re-fetches
-the real server state and the component re-renders with the actual stock count,
-effectively rolling back the optimistic update. The error message from
-`fetcher.data.error` is displayed inline beneath the button.
-
-**Double-submit prevention:**
-
-```tsx
-<Button
-  submit
-  disabled={isSubmitting || isOutOfStock}
-  loading={isSubmitting}
->
-  Claim One
-</Button>
-```
-
-The button is disabled whenever `fetcher.state !== "idle"`, so a second click
-is impossible while the first request is pending.
+**Double-submit prevention** is handled by disabling the button whenever `fetcher.state !== "idle"`. Simple and effective.
 
 ---
 
-## Task 3 — Error Boundary & Retry Logic
+## Task 3 — Error Boundary & Retry
 
-### Two layers of error containment
+There are two layers of error handling here, each catching a different type of failure.
 
-**Layer 1 — `<Await errorElement>` (handles the deferred promise rejection)**
+**Layer 1** — The loader returns an unawaited Promise, which React Router streams to the client. If that Promise rejects (the 20% failure case), `<Await>` catches it and renders `<InventoryError>` in place of the table. The page shell stays completely untouched.
 
-Because the loader uses `defer()`, the `getInventory` promise can reject *after*
-the page has already rendered. React's `<Await>` catches that rejection and
-renders the `errorElement` prop — an `<InventoryError>` component with a Polaris
-`Banner` and a Retry button — **without unmounting the page shell**.
+**Layer 2** — The exported `ErrorBoundary` function is React Router's convention for route-level error catching. It handles anything that throws outside the streamed Promise (e.g. a sync error in the loader). Same idea — the layout stays visible, only the content area shows the error.
 
-**Layer 2 — exported `ErrorBoundary` (handles all other route errors)**
-
-Any error that escapes the loader/action outside of the deferred promise (e.g.
-a sync throw in the loader before `defer()`) is caught here. It renders the
-same `Page` shell with a `Banner`, so the navigation/header always stays visible.
-
-### Retry without a full page refresh
+**Retry without page refresh** — Both error components use `useRevalidator`:
 
 ```tsx
 const { revalidate } = useRevalidator();
-
-// Used as the Banner's action:
-action={{ content: "Retry", onAction: revalidate }}
 ```
 
-`useRevalidator().revalidate()` tells Remix to re-run the current route's
-loader and re-render — exactly like a soft navigation but with no URL change
-and no browser reload. The user sees the skeleton appear again while the new
-fetch attempt resolves.
+Calling `revalidate()` tells React Router to re-run the loader for the current route. No URL change, no browser reload, no lost state. The skeleton appears again while the new request is in-flight, and either the data loads or the error shows again.
