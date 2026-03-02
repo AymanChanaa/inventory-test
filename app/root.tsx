@@ -17,6 +17,14 @@ export default function App() {
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <Meta />
         <Links />
+        <style>{`
+          .Polaris-DataTable__Cell {
+            text-align: center !important;
+          }
+          .Polaris-DataTable__Cell--header {
+            text-align: center !important;
+          }
+        `}</style>
       </head>
       <body>
         <AppProvider i18n={en}>

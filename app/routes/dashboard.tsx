@@ -27,8 +27,6 @@ import { getInventory, claimStock } from "~/models/inventory.server";
 type Item = { id: string; name: string; stock: number };
 
 // LOADER (Task 1: Streaming)
-// In React Router v7, defer() is gone. Instead, return a plain object containing an unawaited Promise.
-// React Router detects the Promise automatically and streams it — the page shell renders at 0ms, data arrives ~3s later.
 export function loader() {
   return {
     inventory: getInventory(),
@@ -52,8 +50,9 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 }
 
-// CLAIM BUTTON (Task 2: Optimistic UI)
-function ClaimButton({ item }: { item: Item }) {
+// ROW — one useFetcher shared between StockCell and ActionCell
+// This is the key: both cells read from the same fetcher instance
+function InventoryRow({ item }: { item: Item }) {
   const fetcher = useFetcher<{ error?: string; success?: boolean }>();
 
   const isSubmitting = fetcher.state !== "idle";
@@ -65,29 +64,32 @@ function ClaimButton({ item }: { item: Item }) {
 
   const isOutOfStock = optimisticStock <= 0;
 
-  return (
+  const stockCell = (
+    <InlineStack gap="200" align="center" blockAlign="center">
+      <Text as="span" variant="bodyMd">
+        {optimisticStock}
+      </Text>
+      {isOutOfStock ? (
+        <Badge tone="critical">Out of stock</Badge>
+      ) : (
+        <Badge tone="success">In stock</Badge>
+      )}
+    </InlineStack>
+  );
+
+  const actionCell = (
     <BlockStack gap="100">
-      <InlineStack gap="300" align="center" blockAlign="center">
-        <Text as="span" variant="bodyMd">
-          {optimisticStock}
-        </Text>
-        {isOutOfStock ? (
-          <Badge tone="critical">Out of stock</Badge>
-        ) : (
-          <Badge tone="success">In stock</Badge>
-        )}
-        <fetcher.Form method="post">
-          <input type="hidden" name="id" value={item.id} />
-          <Button
-            submit
-            size="slim"
-            disabled={isSubmitting || isOutOfStock}
-            loading={isSubmitting}
-          >
-            Claim One
-          </Button>
-        </fetcher.Form>
-      </InlineStack>
+      <fetcher.Form method="post">
+        <input type="hidden" name="id" value={item.id} />
+        <Button
+          submit
+          size="slim"
+          disabled={isSubmitting || isOutOfStock}
+          loading={isSubmitting}
+        >
+          Claim One
+        </Button>
+      </fetcher.Form>
       {fetcher.data?.error && (
         <Text as="span" tone="critical" variant="bodySm">
           {fetcher.data.error}
@@ -95,20 +97,18 @@ function ClaimButton({ item }: { item: Item }) {
       )}
     </BlockStack>
   );
+
+  return [item.id, item.name, stockCell, actionCell];
 }
 
 // INVENTORY TABLE
 function InventoryTable({ items }: { items: Item[] }) {
-  const rows = items.map((item) => [
-    item.id,
-    item.name,
-    <ClaimButton key={item.id} item={item} />,
-  ]);
+  const rows = items.map((item) => InventoryRow({ item }));
 
   return (
     <DataTable
-      columnContentTypes={["text", "text", "text"]}
-      headings={["ID", "Name", "Stock / Action"]}
+      columnContentTypes={["text", "text", "text", "text"]}
+      headings={["ID", "Name", "Stock", "Action"]}
       rows={rows}
     />
   );
